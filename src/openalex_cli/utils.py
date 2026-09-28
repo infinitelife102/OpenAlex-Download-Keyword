@@ -22,6 +22,34 @@ class StorageType(Enum):
     S3 = "s3"
 
 
+def publication_date_path(
+    filename_base: str,
+    extension: str,
+    publication_date: str | None,
+) -> Path:
+    """Place a file under YYYYMM/DD from its publication date.
+
+    2024-09-11 becomes 202409/11/<filename>. A missing or unusable date
+    uses an ``unknown`` directory. The year stays four digits so 1924 and
+    2024 do not share a folder.
+    """
+    folder = Path("unknown")
+    if publication_date:
+        parts = publication_date.strip().split("-")
+        if len(parts) >= 2 and parts[0].isdigit() and parts[1].isdigit():
+            year = int(parts[0])
+            month = int(parts[1])
+            if 1 <= month <= 12:
+                year_month = f"{year:04d}{month:02d}"
+                day_folder = "unknown"
+                if len(parts) >= 3 and parts[2][:2].isdigit():
+                    day = int(parts[2][:2])
+                    if 1 <= day <= 31:
+                        day_folder = f"{day:02d}"
+                folder = Path(year_month) / day_folder
+    return folder / f"{filename_base}.{extension}"
+
+
 def work_id_to_path(work_id: str, extension: str, nested: bool = False) -> Path:
     """
     Convert a work ID to a file path.

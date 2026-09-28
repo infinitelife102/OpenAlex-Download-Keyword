@@ -15,7 +15,13 @@ from .checkpoint import CheckpointManager
 from .progress import ProgressTracker
 from .rate_limiter import AdaptiveRateLimiter
 from .storage import LocalStorage, S3Storage, StorageBackend
-from .utils import ContentFormat, StorageType, doi_to_filename, work_id_to_path
+from .utils import (
+    ContentFormat,
+    StorageType,
+    doi_to_filename,
+    publication_date_path,
+    work_id_to_path,
+)
 
 
 @dataclass
@@ -35,6 +41,7 @@ class DownloadConfig:
     quiet: bool = False
     verbose: bool = False
     nested: bool = False
+    by_date: bool = False
     work_ids: list[str] | None = None
     original_identifiers: dict[str, str] | None = None  # Maps work_id -> original input (e.g., DOI)
     sample: int | None = None  # Random sample size (max 10,000)
@@ -72,6 +79,7 @@ class DownloadOrchestrator:
         # Control flags
         self._shutdown_requested = False
         self._credits_exhausted = False
+        self.checkpoint_conflict = False
         # Queues are created in run() to ensure they're in the correct event loop
         self._work_queue: asyncio.Queue[WorkItem | None] | None = None
         self._results_queue: asyncio.Queue[DownloadResult] | None = None
@@ -203,6 +211,7 @@ class DownloadOrchestrator:
                 filter_match = existing.filter_str == self.config.filter_str
 
                 if not format_match or not filter_match:
+                    self.checkpoint_conflict = True
                     if self.progress_tracker:
                         self.progress_tracker.log_warning(
                             "Existing checkpoint has different settings."
@@ -262,16 +271,12 @@ class DownloadOrchestrator:
 
                 # Track total and warn about flat directory for large downloads
                 total_count += len(works)
-                if (
-                    not warned_about_flat
-                    and total_count > 10000
-                    and not self.config.nested
-                    and self.progress_tracker
-                ):
-                    self.progress_tracker.log_warning(
-                        f"Downloading {total_count:,}+ files to flat directory. "
-                        "Consider using --nested for better filesystem performance."
-                    )
+                if self._needs_flat_directory_warning(total_count, warned_about_flat):
+                    if self.progress_tracker:
+                        self.progress_tracker.log_warning(
+                            f"Downloading {total_count:,}+ files to flat directory. "
+                            "Consider using --nested for better filesystem performance."
+                        )
                     warned_about_flat = True
 
                 for work in works:
@@ -315,16 +320,12 @@ class DownloadOrchestrator:
                     break
 
                 total_count += len(works)
-                if (
-                    not warned_about_flat
-                    and total_count > 10000
-                    and not self.config.nested
-                    and self.progress_tracker
-                ):
-                    self.progress_tracker.log_warning(
-                        f"Downloading {total_count:,}+ files to flat directory. "
-                        "Consider using --nested for better filesystem performance."
-                    )
+                if self._needs_flat_directory_warning(total_count, warned_about_flat):
+                    if self.progress_tracker:
+                        self.progress_tracker.log_warning(
+                            f"Downloading {total_count:,}+ files to flat directory. "
+                            "Consider using --nested for better filesystem performance."
+                        )
                     warned_about_flat = True
 
                 for work in works:
@@ -372,6 +373,29 @@ class DownloadOrchestrator:
                 if self.progress_tracker:
                     self.progress_tracker.log_error(f"Error fetching metadata for {work_id}: {e}")
 
+    def _needs_flat_directory_warning(self, total_count: int, already_warned: bool) -> bool:
+        """A large flat download can put too many files in one directory.
+
+        Date folders and the nested work-id layout already spread files out.
+        """
+        return (
+            not already_warned
+            and total_count > 10000
+            and not self.config.nested
+            and not self.config.by_date
+        )
+
+    def _output_path(
+        self,
+        filename_base: str,
+        extension: str,
+        publication_date: str | None,
+    ) -> Path:
+        """Relative path for a saved metadata or content file."""
+        if self.config.by_date:
+            return publication_date_path(filename_base, extension, publication_date)
+        return work_id_to_path(filename_base, extension, nested=self.config.nested)
+
     async def _download_worker(self, worker_id: int) -> None:
         """Worker that downloads metadata and optionally content."""
         while not self._shutdown_requested:
@@ -395,11 +419,12 @@ class DownloadOrchestrator:
                     filename_base = doi_to_filename(orig)
 
             # Always save full metadata (fetch from singleton API)
+            meta_content = b""
+            publication_date = work.publication_date
             try:
                 full_metadata = await self.api_client.get_work_metadata(work.work_id)
-                meta_path = str(
-                    work_id_to_path(filename_base, "json", nested=self.config.nested)
-                )
+                publication_date = full_metadata.get("publication_date") or publication_date
+                meta_path = str(self._output_path(filename_base, "json", publication_date))
                 meta_content = json.dumps(full_metadata, indent=2).encode()
                 await self.storage.save(meta_path, meta_content, "application/json")
             except CreditsExhaustedError:
@@ -469,7 +494,7 @@ class DownloadOrchestrator:
                     if result.success and result.content:
                         # Save content
                         ext = "pdf" if fmt == ContentFormat.PDF else "tei.xml"
-                        path = str(work_id_to_path(filename_base, ext, nested=self.config.nested))
+                        path = str(self._output_path(filename_base, ext, publication_date))
                         content_type = (
                             "application/pdf" if fmt == ContentFormat.PDF else "application/xml"
                         )

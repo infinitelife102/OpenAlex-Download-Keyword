@@ -71,4 +71,58 @@ def test_run_starts_when_signal_handlers_unsupported(tmp_path):
 
     asyncio.run(orchestrator.run())
 
+    assert orchestrator.checkpoint_conflict is True
     assert orchestrator.checkpoint_manager.get().filter_str == "publication_year:2019"
+
+
+def test_output_path_follows_publication_date_when_by_date(tmp_path):
+    config = DownloadConfig(
+        api_key="test",
+        output_path=str(tmp_path),
+        by_date=True,
+        workers=1,
+    )
+    orchestrator = DownloadOrchestrator(config)
+
+    path = orchestrator._output_path("W1", "pdf", "2024-09-11")
+
+    assert path.as_posix() == "202409/11/W1.pdf"
+
+
+def test_output_path_stays_flat_without_by_date(tmp_path):
+    orchestrator = _orchestrator(tmp_path)
+
+    path = orchestrator._output_path("W1", "pdf", "2024-09-11")
+
+    assert path.as_posix() == "W1.pdf"
+
+
+def test_by_date_skips_flat_directory_warning(tmp_path):
+    config = DownloadConfig(
+        api_key="test",
+        output_path=str(tmp_path),
+        by_date=True,
+        workers=1,
+    )
+    orchestrator = DownloadOrchestrator(config)
+
+    assert orchestrator._needs_flat_directory_warning(10001, already_warned=False) is False
+
+
+def test_flat_directory_warning_for_large_flat_download(tmp_path):
+    orchestrator = _orchestrator(tmp_path)
+
+    assert orchestrator._needs_flat_directory_warning(10001, already_warned=False) is True
+    assert orchestrator._needs_flat_directory_warning(10000, already_warned=False) is False
+
+
+def test_nested_skips_flat_directory_warning(tmp_path):
+    config = DownloadConfig(
+        api_key="test",
+        output_path=str(tmp_path),
+        nested=True,
+        workers=1,
+    )
+    orchestrator = DownloadOrchestrator(config)
+
+    assert orchestrator._needs_flat_directory_warning(10001, already_warned=False) is False

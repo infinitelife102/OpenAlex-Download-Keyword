@@ -353,7 +353,7 @@ def download(
     finally:
         progress.stop()
 
-    if orchestrator._credits_exhausted:
+    if orchestrator.checkpoint_conflict or orchestrator._credits_exhausted:
         sys.exit(1)
 
 

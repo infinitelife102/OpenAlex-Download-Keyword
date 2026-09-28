@@ -9,6 +9,7 @@ from openalex_cli.utils import (
     format_rate,
     parse_identifier,
     parse_work_id,
+    publication_date_path,
     work_id_to_path,
 )
 
@@ -34,6 +35,46 @@ class TestWorkIdToPath:
     def test_nested_xml_extension(self):
         path = work_id_to_path("W2741809807", "tei.xml", nested=True)
         assert str(path) == "W27/41/W2741809807.tei.xml"
+
+
+class TestPublicationDatePath:
+    def test_full_date(self):
+        path = publication_date_path("W2741809807", "pdf", "2024-09-11")
+        assert path.as_posix() == "202409/11/W2741809807.pdf"
+
+    def test_single_digit_month_and_day(self):
+        path = publication_date_path("W1", "json", "2024-9-3")
+        assert path.as_posix() == "202409/03/W1.json"
+
+    def test_missing_date(self):
+        path = publication_date_path("W1", "json", None)
+        assert path.as_posix() == "unknown/W1.json"
+
+    def test_year_and_month_only(self):
+        path = publication_date_path("W1", "pdf", "2024-09")
+        assert path.as_posix() == "202409/unknown/W1.pdf"
+
+    def test_centuries_stay_in_separate_folders(self):
+        earlier = publication_date_path("W1", "pdf", "1924-09-11")
+        later = publication_date_path("W2", "pdf", "2024-09-11")
+        assert earlier.as_posix() == "192409/11/W1.pdf"
+        assert later.as_posix() == "202409/11/W2.pdf"
+
+    def test_invalid_month_uses_unknown(self):
+        path = publication_date_path("W1", "json", "2024-13-01")
+        assert path.as_posix() == "unknown/W1.json"
+
+    def test_empty_date_uses_unknown(self):
+        path = publication_date_path("W1", "json", "")
+        assert path.as_posix() == "unknown/W1.json"
+
+    def test_day_zero_keeps_year_and_month(self):
+        path = publication_date_path("W1", "pdf", "2024-09-00")
+        assert path.as_posix() == "202409/unknown/W1.pdf"
+
+    def test_datetime_uses_the_calendar_day(self):
+        path = publication_date_path("W1", "pdf", "2024-09-11T00:00:00")
+        assert path.as_posix() == "202409/11/W1.pdf"
 
 
 class TestParseWorkId:
