@@ -84,10 +84,10 @@ class DownloadOrchestrator:
         self._work_queue = asyncio.Queue()
         self._results_queue = asyncio.Queue()
 
-        # Set up signal handlers for graceful shutdown
+        # Graceful Ctrl+C where the loop supports it. Windows raises
+        # NotImplementedError; collection and checkpointing do not need this.
         loop = asyncio.get_running_loop()
-        for sig in (signal.SIGINT, signal.SIGTERM):
-            loop.add_signal_handler(sig, self._request_shutdown)
+        installed_signals = self._install_shutdown_handlers(loop)
 
         try:
             # Initialize or resume checkpoint
@@ -143,9 +143,30 @@ class DownloadOrchestrator:
             await self.api_client.close()
             await self.storage.close()
 
-            # Remove signal handlers
-            for sig in (signal.SIGINT, signal.SIGTERM):
-                loop.remove_signal_handler(sig)
+            self._remove_shutdown_handlers(loop, installed_signals)
+
+    def _install_shutdown_handlers(self, loop: asyncio.AbstractEventLoop) -> list[int]:
+        """Register SIGINT/SIGTERM handlers when the event loop supports them.
+
+        Returns the signal numbers that were actually registered.
+        """
+        installed: list[int] = []
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            try:
+                loop.add_signal_handler(sig, self._request_shutdown)
+            except NotImplementedError:
+                continue
+            installed.append(sig)
+        return installed
+
+    def _remove_shutdown_handlers(
+        self,
+        loop: asyncio.AbstractEventLoop,
+        installed: list[int],
+    ) -> None:
+        """Remove handlers previously installed by _install_shutdown_handlers."""
+        for sig in installed:
+            loop.remove_signal_handler(sig)
 
     def _request_shutdown(self) -> None:
         """Handle shutdown signal."""
