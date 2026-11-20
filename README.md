@@ -1,8 +1,43 @@
 # OpenAlex Official CLI
 
-Official command-line interface for [OpenAlex](https://openalex.org). Download work metadata and full-text content (PDFs, TEI XML) in bulk.
+Command-line tool for downloading work metadata and full text (PDF, TEI XML) in bulk from [OpenAlex](https://openalex.org). In this checkout, `download_works.py` is the script to run. The `openalex` command below is the general CLI for the same downloader.
 
 > **Note:** This package was formerly known as `openalex-content-downloader`. If you have that installed, please switch to `openalex-official`.
+
+## Download by topic
+
+The script downloads English articles from 2020 onward, newest publication date first, one folder per topic group. Keywords in a group are combined with OR, so a paper that matches more than one phrase is stored once. Within one phrase, every word must appear in the English title or abstract. Do not put `,` or `|` inside a phrase.
+
+Put the API key in `.env` at the project root, then run the script.
+
+```
+OPENALEX_API_KEY=your_key_here
+```
+
+```bash
+python download_works.py
+```
+
+Files are saved under `D:/20260928_paper/<group>/`. A publication date of `2024-09-11` is stored as JSON and PDF in `202409/11/`. Only works that have a PDF are downloaded. Before each group resumes, the script fills any file that already has JSON or PDF but is missing the other. Run the same command again to resume from the checkpoint. If you change the keywords, subfields, or sort, the existing checkpoint no longer matches: use another folder name, or delete that folder's `.openalex-checkpoint.json` and start again.
+
+Each active group saves the newest 1,500 papers. `crops` is commented out in `SEARCHES` and is not downloaded.
+
+| Folder | Subfields | Keywords |
+|--------|-----------|----------|
+| `hydropower` | 2102 Energy Engineering and Power Technology, 2105 Renewable Energy, Sustainability and the Environment, 2210 Mechanical Engineering, 2208 Electrical and Electronic Engineering | hydropower, hydroelectric, hydro turbine, pumped storage |
+| `thermal_power` | 2102 Energy Engineering and Power Technology, 2103 Fuel Technology, 2210 Mechanical Engineering | thermal power plant, steam turbine, combined cycle, power plant efficiency, power plant retrofit |
+| `dairy` | 1106 Food Science | dairy processing, milk processing, milk powder, cheese, yogurt |
+
+Edit `YEAR_FROM`, `SORT`, and `SEARCHES` at the top of `download_works.py`. Raising `limit` continues from the papers already saved. `limit: None` saves every match in that group.
+
+```
+D:/20260928_paper/hydropower/
+├── 202409/
+│   └── 11/
+│       ├── W2741809807.json
+│       └── W2741809807.pdf
+└── .openalex-checkpoint.json
+```
 
 ## Installation
 

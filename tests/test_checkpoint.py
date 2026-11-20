@@ -33,6 +33,14 @@ class TestCheckpoint:
         assert restored.failed_work_ids == {"W4"}
         assert restored.stats.total_downloaded == 3
         assert restored.stats.total_failed == 1
+        assert restored.sort is None
+
+    def test_sort_round_trip(self):
+        checkpoint = Checkpoint(sort="publication_date:desc")
+
+        restored = Checkpoint.from_dict(checkpoint.to_dict())
+
+        assert restored.sort == "publication_date:desc"
 
 
 class TestCheckpointManager:

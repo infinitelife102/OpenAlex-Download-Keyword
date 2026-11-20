@@ -137,6 +137,7 @@ class OpenAlexAPIClient:
         filter_str: str | None = None,
         content_format: ContentFormat = ContentFormat.NONE,
         cursor: str = "*",
+        sort: str | None = None,
     ) -> AsyncIterator[tuple[list[WorkItem], str | None]]:
         """
         List works using cursor pagination.
@@ -171,6 +172,8 @@ class OpenAlexAPIClient:
             }
             if full_filter:
                 params["filter"] = full_filter
+            if sort:
+                params["sort"] = sort
             url = f"{self.WORKS_API_BASE}/works"
 
             async with session.get(url, params=params) as response:

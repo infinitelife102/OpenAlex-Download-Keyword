@@ -25,9 +25,11 @@ class DownloadStats:
 class Checkpoint:
     """Checkpoint state for resumable downloads."""
 
-    # Filter and format used for this download
+    # Filter, format, and sort used for this download.
+    # The cursor is only valid for the same sort order.
     filter_str: str | None = None
     content_format: str = "pdf"
+    sort: str | None = None
 
     # Pagination state
     current_cursor: str = "*"
@@ -47,6 +49,7 @@ class Checkpoint:
         return {
             "filter_str": self.filter_str,
             "content_format": self.content_format,
+            "sort": self.sort,
             "current_cursor": self.current_cursor,
             "pages_completed": self.pages_completed,
             "completed_work_ids": list(self.completed_work_ids),
@@ -61,6 +64,7 @@ class Checkpoint:
         return cls(
             filter_str=data.get("filter_str"),
             content_format=data.get("content_format", "pdf"),
+            sort=data.get("sort"),
             current_cursor=data.get("current_cursor", "*"),
             pages_completed=data.get("pages_completed", 0),
             completed_work_ids=set(data.get("completed_work_ids", [])),
@@ -117,11 +121,13 @@ class CheckpointManager:
         self,
         filter_str: str | None = None,
         content_format: str = "pdf",
+        sort: str | None = None,
     ) -> Checkpoint:
         """Create a new checkpoint."""
         self._checkpoint = Checkpoint(
             filter_str=filter_str,
             content_format=content_format,
+            sort=sort,
         )
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self._save()

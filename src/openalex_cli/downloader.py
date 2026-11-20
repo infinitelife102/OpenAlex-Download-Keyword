@@ -34,6 +34,8 @@ class DownloadConfig:
     s3_bucket: str | None = None
     s3_prefix: str = ""
     filter_str: str | None = None
+    sort: str | None = None  # e.g. publication_date:desc; None keeps the API default
+    max_works: int | None = None  # Stop after this many works; None means no cap
     content_format: ContentFormat = ContentFormat.NONE  # Default: metadata only
     workers: int = 50
     resume: bool = True
@@ -209,18 +211,19 @@ class DownloadOrchestrator:
                 # Verify compatibility
                 format_match = existing.content_format == self.config.content_format.value
                 filter_match = existing.filter_str == self.config.filter_str
+                sort_match = existing.sort == self.config.sort
 
-                if not format_match or not filter_match:
+                if not format_match or not filter_match or not sort_match:
                     self.checkpoint_conflict = True
                     if self.progress_tracker:
                         self.progress_tracker.log_warning(
                             "Existing checkpoint has different settings."
                         )
                         self.progress_tracker.log_warning(
-                            f"  Checkpoint: format={existing.content_format}, filter={existing.filter_str}"
+                            f"  Checkpoint: format={existing.content_format}, filter={existing.filter_str}, sort={existing.sort}"
                         )
                         self.progress_tracker.log_warning(
-                            f"  Current: format={self.config.content_format.value}, filter={self.config.filter_str}"
+                            f"  Current: format={self.config.content_format.value}, filter={self.config.filter_str}, sort={self.config.sort}"
                         )
                         self.progress_tracker.log_warning(
                             "Use --fresh to start over or match the checkpoint settings."
@@ -240,6 +243,7 @@ class DownloadOrchestrator:
         return self.checkpoint_manager.create(
             filter_str=self.config.filter_str,
             content_format=self.config.content_format.value,
+            sort=self.config.sort,
         )
 
     async def _produce_work(self) -> None:
@@ -259,12 +263,22 @@ class DownloadOrchestrator:
         cursor = checkpoint.current_cursor
         warned_about_flat = False
         total_count = 0
+        limit = self.config.max_works
+        # Already saved works count toward the cap, so a rerun does not fetch another batch.
+        accepted = len(checkpoint.completed_work_ids)
+        if limit is not None and accepted >= limit:
+            if self.progress_tracker:
+                self.progress_tracker.log_info(
+                    f"Download limit reached: {accepted} of {limit}"
+                )
+            return
 
         try:
             async for works, next_cursor in self.api_client.list_works(
                 filter_str=self.config.filter_str,
                 content_format=self.config.content_format,
                 cursor=cursor,
+                sort=self.config.sort,
             ):
                 if self._shutdown_requested:
                     break
@@ -279,15 +293,30 @@ class DownloadOrchestrator:
                         )
                     warned_about_flat = True
 
+                reached_limit = False
                 for work in works:
                     if self._shutdown_requested:
                         break
+                    if limit is not None and accepted >= limit:
+                        reached_limit = True
+                        break
 
-                    # Skip already completed
+                    # Skip already completed. They were counted in accepted above.
                     if self.checkpoint_manager.is_completed(work.work_id):
                         continue
 
+                    accepted += 1
                     await self._work_queue.put(work)
+
+                page_filled_cap = limit is not None and accepted >= limit
+                if (reached_limit or page_filled_cap) and self.progress_tracker:
+                    self.progress_tracker.log_info(
+                        f"Download limit reached: {accepted} of {limit}"
+                    )
+                if self._shutdown_requested or reached_limit or page_filled_cap:
+                    # Stay on this page. A higher cap can continue, and a save
+                    # that failed on this page is retried instead of replaced.
+                    break
 
                 # Update cursor checkpoint
                 self.checkpoint_manager.update_cursor(next_cursor)
